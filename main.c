@@ -1,47 +1,91 @@
-#include "operations.h"
-#include "random.h"
-#include "timer.h"
-#include "omp_common.h"
-
-#include <stdint.h>
-#include <time.h>
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <omp.h>
+#include <time.h>
+
+#define N 2500000
+#define ITERATIONS 1000
+
+void sequential_operations(double* a, double* b, double* add, double* sub, double* mul, double* div) {
+    for (int i = 0; i < N; i++) {
+        add[i] = a[i] + b[i];
+        sub[i] = a[i] - b[i];
+        mul[i] = a[i] * b[i];
+        if (b[i] != 0.0) {
+            div[i] = a[i] / b[i];
+        }
+        else {
+            div[i] = 0.0;
+        }
+    }
+}
+
+void parallel_operations(double* a, double* b, double* add, double* sub, double* mul, double* div, int num_threads) {
+#pragma omp parallel for num_threads(num_threads)
+    for (int i = 0; i < N; i++) {
+        add[i] = a[i] + b[i];
+        sub[i] = a[i] - b[i];
+        mul[i] = a[i] * b[i];
+        if (b[i] != 0.0) {
+            div[i] = a[i] / b[i];
+        }
+        else {
+            div[i] = 0.0;
+        }
+    }
+}
+
+void initialize_arrays(double* a, double* b) {
+    for (int i = 0; i < N; i++) {
+        a[i] = (double)rand() / RAND_MAX * 100.0;
+        b[i] = (double)rand() / RAND_MAX * 100.0 + 1.0; // избегаем деления на ноль
+    }
+}
+
+double measure_time(void (*func)(double*, double*, double*, double*, double*, double*, int),
+    double* a, double* b, double* add, double* sub, double* mul, double* div,
+    int num_threads) {
+    double start_time = omp_get_wtime();
+    for (int i = 0; i < ITERATIONS; i++) {
+        func(a, b, add, sub, mul, div, num_threads);
+    }
+    double end_time = omp_get_wtime();
+    return (end_time - start_time) / ITERATIONS;
+}
 
 int main() {
-  srand(time(NULL));
+    double* a = (double*)malloc(N * sizeof(double));
+    double* b = (double*)malloc(N * sizeof(double));
+    double* add = (double*)malloc(N * sizeof(double));
+    double* sub = (double*)malloc(N * sizeof(double));
+    double* mul = (double*)malloc(N * sizeof(double));
+    double* div = (double*)malloc(N * sizeof(double));
 
-  arr_t array1[ARRAY_SIZE],
-        array2[ARRAY_SIZE],
-        out_array[ARRAY_SIZE];
-  double trand1=0, trand2=0,
-         ptadd=0, ptsub=0, ptmul=0, ptdiv=0,
-         stadd=0, stsub=0, stmul=0, stdiv=0;
+    srand(time(NULL));
+    initialize_arrays(a, b);
 
-  printf("Settings:\n\tOMP Threads: %d\n\tArray sizes: %d\n\tCycles: %d\n\n",
-         getThreadsNum(), ARRAY_SIZE, CYCLES);
+    // Последовательное выполнение
+    double seq_time = measure_time((void (*)(double*, double*, double*, double*, double*, double*, int))sequential_operations,
+        a, b, add, sub, mul, div, 1);
+    printf("Sequential time: %.6f seconds per operation\n", seq_time);
 
+    // Параллельное выполнение с разным количеством потоков
+    int thread_counts[] = { 2, 4, 8, 16 };
+    int num_tests = sizeof(thread_counts) / sizeof(thread_counts[0]);
 
-  for(uint32_t i=0; i<CYCLES; ++i) {
-    randomFill(array1, ARRAY_SIZE);
-    randomFill(array2, ARRAY_SIZE);
+    for (int i = 0; i < num_tests; i++) {
+        int threads = thread_counts[i];
+        double par_time = measure_time(parallel_operations, a, b, add, sub, mul, div, threads);
+        printf("Parallel time (%d threads): %.6f seconds per operation\n",
+            threads, par_time, seq_time / par_time);
+    }
 
-    ADDTIME_COR(pAddArray, ptadd, CYCLES, array1, array2, out_array, ARRAY_SIZE);
-    ADDTIME_COR(sAddArray, stadd, CYCLES, array1, array2, out_array, ARRAY_SIZE);
+    free(a);
+    free(b);
+    free(add);
+    free(sub);
+    free(mul);
+    free(div);
 
-    ADDTIME_COR(pSubArray, ptsub, CYCLES, array1, array2, out_array, ARRAY_SIZE);
-    ADDTIME_COR(sSubArray, stsub, CYCLES, array1, array2, out_array, ARRAY_SIZE);
-
-    ADDTIME_COR(pMulArray, ptmul, CYCLES, array1, array2, out_array, ARRAY_SIZE);
-    ADDTIME_COR(sMulArray, stmul, CYCLES, array1, array2, out_array, ARRAY_SIZE);
-
-    ADDTIME_COR(pDivArray, ptdiv, CYCLES, array1, array2, out_array, ARRAY_SIZE);
-    ADDTIME_COR(sDivArray, stdiv, CYCLES, array1, array2, out_array, ARRAY_SIZE);
-  }
-
-  printf("Calculations done.\np - parallel, s - serial\nTime for:\n\tpAdd: %f\t\tsAdd: %f\n\
-\tpSub: %f\t\tsSub: %f\n\tpMul: %f\t\tsMul: %f\n\tpDiv: %f\t\tsDiv: %f\n\tRand arr1: %f\t\tRand arr2: %f",
-         ptadd, stadd, ptsub, stsub, ptmul, stmul, ptdiv, stdiv, trand1, trand2);
-
-  return 0;
+    return 0;
 }
